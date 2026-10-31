@@ -20,10 +20,12 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 
-	<!-- Menu-bar app: no Dock icon, no app switcher entry. The main window
-	     is opened from the menu bar. LSUIElement must stay true. -->
+	<!-- Dock icon: ON (was LSUIElement true — menu-bar only, no Dock
+	     icon). That hid the app: re-opening a running menu-bar app
+	     showed nothing if the window was closed. The menu-bar ✳ stays,
+	     but the app now also has a Dock icon. -->
 	<key>LSUIElement</key>
-	<true/>
+	<false/>
 
 	<!-- Minimum macOS: 14.0 (MenuBarExtra window style, Layout protocol,
 	     and the Swift 5.9 features used in this codebase). -->
