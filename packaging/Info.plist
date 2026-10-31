@@ -20,9 +20,14 @@
 	<string>????</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
-	<!-- Menu-bar only: no Dock icon. The Swift app uses MenuBarExtra. -->
+	<!-- Dock icon: ON. The app used to be LSUIElement (menu-bar only,
+	     no Dock icon), and that is why re-opening it did nothing visible:
+	     double-clicking a running menu-bar app just activates it, and
+	     with the window closed there was nothing to click. The app
+	     still has its menu-bar ✳, but now it also has a Dock icon, so
+	     clicking the app always brings its window forward. -->
 	<key>LSUIElement</key>
-	<true/>
+	<false/>
 	<key>NSCameraUsageDescription</key>
 	<string>Subvox Local reads your lips from the webcam to turn silent mouthing into text. Video never leaves your Mac.</string>
 	<!-- Input Monitoring + Accessibility cannot be declared here; macOS
