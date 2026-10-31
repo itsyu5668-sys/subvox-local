@@ -30,6 +30,18 @@ Files changed: `src/subvox_local/cleanup.py`, `adapt.py`, `vsr.py`,
 `setup_macos.sh`, `scripts/download-models.sh` (section 9 GGUF),
 `MODELS.md`, `tests/test_cleanup.py` (fallback test is now deterministic
 + a no-MLX-import test), this doc. Swift UI / packaging untouched.
+Train First + live dictation (2026-10-31): new
+`src/subvox_local/stream.py` (`dictate-stream` / `serve`, JSON lines),
+`app.py` gains `dictate-stream`, `serve`, `record-one`, `test-sentence`
+and `setup-fast --non-interactive --clip-dir --takes --steps
+--reuse-clips` (+ `adapt-more --non-interactive`); Swift
+`BackendBridge.DictationSession` now launches `dictate-stream` and
+parses its JSON lines, `DictationView` pastes cleaned text at the
+cursor and shows measured latency/confidence, `SetupView` is Train
+First (10 sentences x 3 takes, per-sentence `record-one`, 3x birch
+test), `AppState` defaults to the Setup tab, onboarding ends at Setup.
+License key validation is real (format + checksum, test key
+`SUBVOX-7K2Q-9M4D-8X3Y` validates) — see `swift/LicenseManager.swift`.
 
 ## GGUF source correction
 
@@ -90,6 +102,19 @@ What that means on an Intel i5:
   saved ONLY if held-out WER beats stock. A slow train that does not
   help costs time, not accuracy.
 
+## The script .app is retired (2026-10-31)
+
+The hand-built click-to-open `.app` (CFBundleExecutable = a bash
+script) opened Script Editor on double-click and was rejected by
+Gatekeeper. It is retired — see the top of `packaging/README.md`.
+Only two builds are supported now: the GitHub Actions `.dmg`
+artifact, or `./packaging/build_app.sh` + `./packaging/build_dmg.sh`
+on the Intel Mac. Both fail loudly if the executable is ever a script
+again (`build_app.sh` step 4b, workflow "Verify CFBundleExecutable"
+step). The compiled fallback entry point, if the SwiftUI binary is
+ever unusable, is `packaging/launcher-swift/` (minimal Foundation-only
+Swift binary — UNTESTED ON MAC, not wired into the build yet).
+
 ## How to run on the Intel Mac
 
 ```sh
@@ -99,14 +124,56 @@ What that means on an Intel i5:
 uv run python -m subvox_local doctor
 #    expect: qwen3-0.6b-gguf ... ok, ~379 MB; llama_cpp importable;
 #    mlx_lm "not used on Intel Mac"
-# 3. Fast setup (SLOW on i5 — start it and wait, do not expect 2 min):
-uv run python -m subvox_local setup-fast
-# 4. Personal LM (optional, biggest accuracy win):
+# 3. TRAIN FIRST (step 1, before dictation — stock Auto-AVSR is not
+#    accurate on a new face; the personal LoRA is the accuracy fix):
+uv run python -m subvox_local setup-fast --non-interactive \
+    --clip-dir ~/Library/Application\ Support/SubvoxLocal/clips/fast_setup \
+    --takes 3 --steps 150
+#    Records the 10 Harvard sentences, 3 takes each (30 clips, ~6 s
+#    each). Takes 1-2 train the LoRA (rank 8, 589,824 params); take 3
+#    of each sentence is held out for the keep gate. Training is SLOW
+#    on an i5 CPU — plausibly 10+ minutes for 150 steps. Do NOT expect
+#    2 minutes. The report at the end prints the MEASURED train seconds.
+#    If it is interrupted, re-run the same command with --reuse-clips
+#    to keep already-recorded takes, and training resumes from the
+#    checkpoint saved every 50 steps.
+# 4. Personal LM (optional, biggest accuracy win after the LoRA):
 uv run python -m subvox_local import-text my-writing.txt
 uv run python -m subvox_local train-lm
-# 5. Dictate: hold Right Option anywhere, mouth words, release.
-#    Or test a file: uv run python -m subvox_local file talk.mp4
+# 5. Test it — mouth the birch sentence 3 times, stock vs adapted:
+uv run python -m subvox_local test-sentence --takes 3 --non-interactive
+#    Prints per-run raw / cleaned / WER / latency, plus stock_wer,
+#    adapted_wer and kept (yes/no). Same mouth clips decoded twice,
+#    so the comparison is fair.
+# 6. Dictate live (JSON lines, one per utterance):
+uv run python -m subvox_local dictate-stream --seconds 10
+#    Each line: {"event":"utterance","raw":...,"cleaned":...,
+#    "top3":[...],"latency_s":...,"vsr_s":...,"cleanup_s":...,
+#    "confidence":...} — latency_s is measured decode time only
+#    (end of recording to cleaned text), confidence is top-3
+#    agreement, not a calibrated probability. Expect several seconds
+#    per utterance on the i5, not 1-2 s.
+#    Or test a file: uv run python -m subvox_local dictate-stream --file talk.mp4
+#    (or the older: uv run python -m subvox_local file talk.mp4)
+#    Hold-to-talk in the app: hold Space/H or Right Option, release to decode.
 ```
+
+### What to record (fill in on the Mac — no numbers here are measured yet)
+
+| Measurement | Where it comes from | Record here |
+|---|---|---|
+| Train First: stock WER (held-out take 3, 10 clips) | `setup-fast --non-interactive` JSON report, `stock_wer` | |
+| Train First: adapted WER | same report, `adapted_wer` | |
+| Train First: kept? (yes/no) | same report, `kept` | |
+| Train First: train seconds / steps | same report, `train.seconds` / `train.steps` (150 steps) | |
+| Birch test x3: per-run raw / cleaned / WER / latency | `test-sentence` JSON report, `adapted_rows` / `stock_rows` | |
+| Birch test: stock WER vs adapted WER, kept | same report, `stock_wer` / `adapted_wer` / `kept` | |
+| Live dictation: latency per utterance | `dictate-stream` JSON lines, `latency_s` (+ `vsr_s`, `cleanup_s`) | |
+| Live dictation: confidence per utterance | same lines, `confidence` (top-3 agreement) | |
+
+In the app, the same numbers appear in Setup (stock/adapted WER, kept,
+measured train seconds) and Dictate (decode time + confidence per
+utterance). Nothing in the UI shows a number until the backend measures it.
 
 Requirements: macOS 14+, Intel x86_64 (Core i5), camera, Python
 3.11–3.12 (via `uv`), torch CPU wheel (installed by `uv sync` on
@@ -147,6 +214,10 @@ cursor. No cloud anywhere: no OpenAI/Anthropic calls, no MLX.
   updates every 50 steps; if it updates, training is progressing.
   Kill it and resume with `resume_path=<checkpoint>` rather than
   starting over.
+- `dictate-stream` prints `{"event":"error", ...}` and exits 1 —
+  that is the honest failure path (missing camera / model / torch),
+  not a bug. Read the `error` field; do not expect a transcript
+  when the backend cannot run. It never fakes output.
 - `device='mps'` / CUDA errors — nothing in this build asks for MPS or
   CUDA. If you see one, an old config or old code is running; pull
   latest and check `load_reader(device=...)` calls.
@@ -155,17 +226,23 @@ cursor. No cloud anywhere: no OpenAI/Anthropic calls, no MLX.
 
 1. `./setup_macos.sh` — expect ~6.6 GB downloads total, `doctor` all ok.
 2. `uv run python -m subvox_local doctor` — GGUF ok, llama_cpp importable.
-3. `uv run python -m subvox_local setup-fast --dry-run` — lists 6 sentences, no camera.
-4. `uv run python -m subvox_local setup-fast` — TIME IT. Record: stock
+3. `uv run python -m subvox_local setup-fast --dry-run` — lists 10 sentences, 3 takes each, no camera.
+4. `uv run python -m subvox_local setup-fast --non-interactive --takes 3 --steps 150` — TIME IT. Record: stock
    WER, adapted WER, kept? (yes/no), train seconds, step count.
-   Do NOT expect ~2 min; record whatever it actually takes.
+   Do NOT expect ~2 min; record whatever it actually takes (plausibly 10+ min).
 5. Cleanup timing: time `clean_top3` on a known top-3 (or one
    dictation) — record GGUF seconds per sentence on the i5.
-6. `uv run python -m subvox_local file <test-video.mp4>` — decode a
+6. `uv run python -m subvox_local dictate-stream --file <test-video.mp4>` — decode a
    known clip, record WER and total seconds from release to text.
-7. Silent mouthing test: mouth "The birch canoe slid on the smooth
-   planks" 3 times, record raw + cleaned output each time.
-8. If LoRA does not beat stock on held-out: keep stock, run
-   `subvox-local adapt-more` (stage 2, background), re-evaluate.
+   Check each JSON line has raw / cleaned / top3 / latency_s / confidence.
+7. Silent mouthing test: `uv run python -m subvox_local test-sentence --takes 3 --non-interactive`
+   — mouth "The birch canoe slid on the smooth planks" 3 times, record
+   per-run raw + cleaned + WER + latency, stock WER vs adapted WER, kept yes/no.
+8. Live dictation in the app: hold Space/H or Right Option, release —
+   cleaned text pastes at the cursor, raw/top-3/latency/confidence show
+   in Dictate. If the backend is missing, the session fails loudly with
+   the error, never a fake transcript.
+9. If LoRA does not beat stock on held-out: keep stock, run
+   `subvox-local adapt-more --non-interactive` (stage 2, background), re-evaluate.
    If it still does not beat stock, the honest answer is
    "stock + personal LM + GGUF cleanup".
