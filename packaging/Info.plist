@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>Subvox Local</string>
+	<key>CFBundleDisplayName</key>
+	<string>Subvox Local</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.subvox.local</string>
+	<key>CFBundleVersion</key>
+	<string>0.1.0</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleExecutable</key>
+	<string>SubvoxLocal</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleSignature</key>
+	<string>????</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<!-- Menu-bar only: no Dock icon. The Swift app uses MenuBarExtra. -->
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Subvox Local reads your lips from the webcam to turn silent mouthing into text. Video never leaves your Mac.</string>
+	<!-- Input Monitoring + Accessibility cannot be declared here; macOS
+	     prompts for them when the app installs its hotkey / paste tap.
+	     See packaging/README.md troubleshooting. -->
+	<key>NSHighResolutionCapable</key>
+	<true/>
+</dict>
+</plist>

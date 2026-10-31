@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Bundle identity -->
+	<key>CFBundleIdentifier</key>
+	<string>com.subvox.local</string>
+	<key>CFBundleName</key>
+	<string>Subvox Local</string>
+	<key>CFBundleDisplayName</key>
+	<string>Subvox Local</string>
+	<key>CFBundleVersion</key>
+	<string>0.1.0</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleExecutable</key>
+	<string>SubvoxLocal</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+
+	<!-- Menu-bar app: no Dock icon, no app switcher entry. The main window
+	     is opened from the menu bar. LSUIElement must stay true. -->
+	<key>LSUIElement</key>
+	<true/>
+
+	<!-- Minimum macOS: 14.0 (MenuBarExtra window style, Layout protocol,
+	     and the Swift 5.9 features used in this codebase). -->
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+
+	<!-- Camera: required. The app cannot dictate without it. -->
+	<key>NSCameraUsageDescription</key>
+	<string>Subvox Local reads your lips with the webcam so you can dictate silently. No video is recorded or sent anywhere — only 96×96 mouth crops are used, on this Mac.</string>
+
+	<!-- Microphone: NOT used. The app is silent lip reading — no audio
+	     is captured. This key is included only so the intent is explicit
+	     if a future build ever touches audio; the current build never
+	     requests microphone access. -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Subvox Local does not use the microphone. This permission is declared for transparency only and is never requested by the current build.</string>
+
+	<!-- No motion, no location, no Bluetooth. The app needs none of them. -->
+
+	<!-- High-resolution (Retina) rendering. -->
+	<key>NSHighResolutionCapable</key>
+	<true/>
+
+	<!-- The app is a menu-bar agent; it should not appear in the Dock,
+	     but it must be able to show its main window. -->
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+</dict>
+</plist>

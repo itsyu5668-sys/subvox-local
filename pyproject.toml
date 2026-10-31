@@ -1,0 +1,41 @@
+[project]
+name = "subvox-local"
+version = "0.1.0"
+description = "Subvox Local: silent lip-reading dictation from your webcam, 100% on-device (macOS Intel Core i5). Camera + Auto-AVSR (torch CPU) + offline Qwen GGUF cleanup via llama-cpp. No cloud."
+# INTEL MAC: Francis's Mac is an Intel Core i5, NOT Apple Silicon.
+# MLX was REMOVED (mlx-lm is Apple Silicon only and does not run on
+# Intel Macs). Cleanup is now GGUF Qwen3 via llama-cpp-python, CPU.
+# Python 3.11-3.12 (torch + llama-cpp-python wheels; 3.13 not yet
+# verified for this stack). No cloud deps: no anthropic / openai.
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    # Core VSR stack — same as Lipflow (MIT, Apache 2.0 vendored ESPnet).
+    # NOTE: anthropic / openai are deliberately NOT dependencies. No cloud calls.
+    "av>=18.1.0",
+    "mediapipe==0.10.21",
+    "llama-cpp-python>=0.3.0",
+    "numpy<2",
+    "opencv-python>=4.9,<4.11",
+    "requests>=2.31",
+    "sentencepiece>=0.2.2",
+    "sounddevice>=0.5.6",
+    "torch>=2.4",  # CPU build on Intel Mac (no MPS/CUDA there): `uv sync` installs the CPU wheel by default on x86_64 macOS
+    # macOS menu-bar / hotkey / paste (darwin only)
+    "pyobjc-framework-avfoundation>=10.3; sys_platform == 'darwin'",
+    "pyobjc-framework-cocoa>=10.3; sys_platform == 'darwin'",
+    "pyobjc-framework-quartz>=10.3; sys_platform == 'darwin'",
+    "pynput>=1.7.7",
+]
+
+[project.scripts]
+subvox-local = "subvox_local.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["subvox_local"]
+
+[dependency-groups]
+dev = ["pytest>=9.1.1"]

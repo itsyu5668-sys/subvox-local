@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+Subvox Local entitlements — v0.1, UNSIGNED first run.
+These are applied at codesign time (see packaging/README.md signing
+checklist). Do NOT claim the app is signed/notarized until that step
+is actually done with Francis's Apple Developer account.
+
+  * com.apple.security.device.camera — webcam access (the whole point).
+  * com.apple.security.cs.allow-unsigned-executable-memory — PyTorch
+    CPU + llama.cpp allocate executable memory for JIT-compiled kernels.
+    Without this, the frozen backend can crash on launch when signed.
+  * com.apple.security.cs.disable-library-validation — the frozen
+    backend loads unsigned vendored .dylib/.so files (torch, mediapipe,
+    llama.cpp) from inside the bundle. Needed until every bundled
+    library is signed with the same Team ID.
+  * com.apple.security.app-sandbox is deliberately NOT enabled: a
+    sandboxed app cannot read the camera + install a global hotkey +
+    paste into other apps without a pile of extra entitlements and a
+    helper. Sandboxing is a later hardening step, not v0.1.
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.device.camera</key>
+	<true/>
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+</dict>
+</plist>

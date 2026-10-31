@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Camera: the app reads lips with the webcam. -->
+	<key>com.apple.security.device.camera</key>
+	<true/>
+
+	<!-- Microphone: NOT requested. Declared here as false-by-omission —
+	     the app never captures audio. If a future build adds whisper
+	     mode (lips + quiet audio), add the entitlement and the
+	     NSMicrophoneUsageDescription prompt then, not before. -->
+
+	<!-- Network: OUTGOING ONLY, and only for the one-time model
+	     download on first launch (Hugging Face / GitHub / Google
+	     storage). Dictation itself never touches the network.
+	     No incoming connections. -->
+	<key>com.apple.security.network.client</key>
+	<true/>
+
+	<!-- No network server entitlement: nothing listens on this Mac. -->
+	<!-- No audio upload, no telemetry, no analytics entitlements. -->
+
+	<!-- App Sandbox: this build is NOT sandboxed, because the Python
+	     backend (uv run python -m subvox_local) must be launched as a
+	     subprocess and must read/write the repo's models/ folder and
+	     ~/Library/Application Support/SubvoxLocal. If a sandboxed
+	     release is wanted later, the backend must be embedded in the
+	     bundle and the sandbox must allow user-selected file access —
+	     that is a separate packaging task, not a one-line change. -->
+</dict>
+</plist>

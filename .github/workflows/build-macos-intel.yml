@@ -1,0 +1,92 @@
+# Subvox Local — build a real Intel .app + .dmg on a Mac in the cloud.
+#
+# Runs on a GitHub-hosted macOS runner and produces:
+#   build/Subvox Local.dmg   (uploaded as a workflow artifact, always)
+#   + a GitHub Release asset when the run is triggered by a version tag.
+#
+# HONEST NOTES — read before trusting a green run:
+# - This workflow targets macos-13, the last GitHub runner label that was
+#   Intel (x86_64). GitHub has been retiring macos-13; if this run fails
+#   with "runner not found" / label unavailable, macos-13 is gone and the
+#   fallback is an Apple Silicon runner (macos-14/15) cross-compiling
+#   x86_64 — which the current build scripts do NOT support (build_app.sh
+#   refuses non-Intel machines, PyInstaller cannot easily freeze an
+#   x86_64 CPU-torch backend on arm64). That fallback needs real work,
+#   not a label swap.
+# - The .dmg is UNSIGNED (no SIGN_IDENTITY in CI). Gatekeeper will block
+#   a plain double-click on other Macs; right-click > Open works.
+#   Signing + notarization need an Apple Developer account and are NOT
+#   wired up here.
+# - A green build does NOT mean the app works end to end. Known gaps
+#   (see packaging/README.md): the live-dictation bridge is still
+#   missing (BackendBridge never calls launcher.sh, no JSON-lines
+#   streaming mode in the Python backend), the first-launch downloader
+#   still has url=null for the Qwen GGUF model, and the license key
+#   accepts any non-empty key. The CI smoke test only proves the
+#   backend binary starts.
+# - set -e is on everywhere (build scripts use `set -euo pipefail`);
+#   nothing here swallows errors or fakes success.
+
+name: Build macOS Intel .dmg
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write  # needed only for the tag-triggered Release upload
+
+jobs:
+  build-intel-dmg:
+    # macos-13 = last Intel (x86_64) GitHub-hosted runner label.
+    # If GitHub has removed it, this job fails at queue time with a
+    # label error — see the header note; do not silently swap labels.
+    runs-on: macos-13
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Confirm Intel runner
+        run: |
+          set -euo pipefail
+          echo "OS: $(sw_vers -productVersion)  arch: $(uname -m)"
+          if [[ "$(uname -m)" != "x86_64" ]]; then
+            echo "ERROR: expected an Intel (x86_64) runner, got $(uname -m)."
+            echo "build_app.sh refuses non-Intel machines; cross-compiling"
+            echo "x86_64 on Apple Silicon is NOT supported by these scripts."
+            exit 1
+          fi
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build Subvox Local.app
+        run: ./packaging/build_app.sh
+
+      - name: Build Subvox Local.dmg
+        run: ./packaging/build_dmg.sh
+
+      - name: Verify .dmg
+        run: |
+          set -euo pipefail
+          ls -lh "build/Subvox Local.dmg"
+          hdiutil verify "build/Subvox Local.dmg"
+          shasum -a 256 "build/Subvox Local.dmg"
+
+      - name: Upload .dmg artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: subvox-local-intel-dmg
+          path: "build/Subvox Local.dmg"
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Attach .dmg to Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: "build/Subvox Local.dmg"
+          generate_release_notes: true
