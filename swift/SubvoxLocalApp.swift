@@ -16,9 +16,44 @@
 //   - @Observable / SwiftData: not used; ObservableObject throughout.
 
 import SwiftUI
+import AppKit
+
+// MARK: - App delegate: re-open must never silently do nothing
+//
+// ROOT CAUSE of "I try to open it again, nothing happens": this app
+// is LSUIElement (menu-bar only, no Dock icon), so double-clicking the
+// .app while it is already running just activates the existing process.
+// If the main window was closed or hidden behind the onboarding sheet,
+// macOS showed nothing at all — no window, no Dock icon to click, only
+// a tiny ✳ in the menu bar. These two delegate methods bring the main
+// window to the front every time the app is activated or re-opened.
+// (The .dmg also now ships WITH a Dock icon — see packaging/Info.plist
+// — so there is always something visible to click.)
+
+final class SubvoxAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidBecomeActive(_ notification: Notification) {
+        bringMainWindowToFront()
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication,
+                                       hasVisibleWindows flag: Bool) -> Bool {
+        bringMainWindowToFront()
+        return true
+    }
+
+    private func bringMainWindowToFront() {
+        NSApp.activate(ignoringOtherApps: true)
+        // The main window is the largest non-menu-bar window; bring
+        // every app window forward so a hidden download window reappears.
+        for window in NSApp.windows where window.canBecomeMain {
+            window.makeKeyAndOrderFront(nil)
+        }
+    }
+}
 
 @main
 struct SubvoxLocalApp: App {
+    @NSApplicationDelegateAdaptor(SubvoxAppDelegate.self) private var appDelegate
     @StateObject private var appState = AppState()
 
     var body: some Scene {
@@ -123,6 +158,7 @@ struct MenuBarView: View {
 
 struct ContentView: View {
     @EnvironmentObject var appState: AppState
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(spacing: 0) {
@@ -149,6 +185,18 @@ struct ContentView: View {
         .sheet(isPresented: $appState.showPaywall) {
             PaywallView()
                 .environmentObject(appState)
+        }
+        .onAppear {
+            // First launch: start the model download at once and show
+            // the Models tab, so the user sees the download window
+            // immediately instead of hunting for a button.
+            appState.autoStartDownloadIfNeeded()
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: NSApplication.didBecomeActiveNotification)) { _ in
+            // Re-opening the app while it is already running brings
+            // the main window forward — never a silent no-op.
+            openWindow(id: "main")
         }
     }
 }
