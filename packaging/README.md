@@ -36,6 +36,15 @@ therefore pins `torch==2.2.2` on `darwin + x86_64` (found 2026-10-31
 in CI run 41220859738). Do not "fix" the pin back to `>=2.4` without
 checking PyPI for an x86_64 macOS wheel first.
 
+**llama-cpp-python on Intel macOS: no prebuilt wheel exists.** PyPI
+carries only sdists and the abetlen CPU wheel index ships macOS wheels
+for arm64 only (checked 2026-10-31, all versions). It builds from
+source, but the build fails linking the `llama-server` binary (httplib
+TLS needs x86_64 OpenSSL symbols macOS does not provide). `build_app.sh`
+therefore installs it with `CMAKE_ARGS="-DLLAMA_BUILD_SERVER=OFF"` —
+Subvox never uses the server binary. If a future version ships an
+Intel macOS wheel, the flag can go.
+
 | Step | Time |
 |---|---|
 | `build_app.sh` first run (uv sync + torch + PyInstaller + swiftc) | ~10–30 min (mostly downloading torch) |

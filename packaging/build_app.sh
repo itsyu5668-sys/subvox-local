@@ -132,13 +132,26 @@ if [[ "$SKIP_BACKEND" == "0" ]]; then
     "${XPY[@]}" -c 'import platform; print("venv python arch:", platform.machine())'
     "${XPY[@]}" -m pip install --quiet --upgrade pip
     "${XPY[@]}" -m pip install -e "$ROOT"
-    "${XPY[@]}" -m pip install llama-cpp-python pyinstaller
+    # llama-cpp-python: there is NO prebuilt Intel macOS wheel (PyPI has
+    # only sdists; the abetlen CPU wheel index ships macOS wheels for
+    # arm64 only). So it builds from source, and that build fails linking
+    # the llama-server binary: its httplib TLS code needs x86_64 OpenSSL
+    # symbols macOS does not provide (ld: symbol(s) not found for
+    # architecture x86_64). Subvox never uses the server binary — cleanup
+    # only imports llama_cpp.Llama — so skip building it.
+    CMAKE_ARGS="-DLLAMA_BUILD_SERVER=OFF" \
+      "${XPY[@]}" -m pip install llama-cpp-python pyinstaller
     echo "NOTE: MLX is deliberately excluded — it has no x86_64 wheels."
     "${XPY[@]}" -m PyInstaller packaging/PyInstaller.spec --noconfirm \
         --distpath "$BUILD/dist" --workpath "$BUILD/pyinstaller"
   else
     uv sync
-    uv pip install llama-cpp-python pyinstaller
+    # Same llama-server link problem as the cross path (see above): no
+    # Intel macOS wheel exists, the source build fails linking the
+    # server binary against missing x86_64 OpenSSL, and Subvox does not
+    # use the server. Skip it here too.
+    CMAKE_ARGS="-DLLAMA_BUILD_SERVER=OFF" \
+      uv pip install llama-cpp-python pyinstaller
     echo "NOTE: MLX is deliberately excluded — it has no x86_64 wheels."
     uv run pyinstaller packaging/PyInstaller.spec --noconfirm \
         --distpath "$BUILD/dist" --workpath "$BUILD/pyinstaller"
