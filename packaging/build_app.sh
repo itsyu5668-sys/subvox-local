@@ -118,16 +118,26 @@ if [[ "$SKIP_BACKEND" == "0" ]]; then
   #
   # llama-cpp-python: there is NO prebuilt Intel macOS wheel (PyPI has
   # only sdists; the abetlen CPU wheel index ships macOS wheels for
-  # arm64 only). So it builds from source, and that build fails linking
-  # the llama-server binary: its httplib TLS code needs x86_64 OpenSSL
-  # symbols macOS does not provide (ld: symbol(s) not found for
-  # architecture x86_64). Subvox never uses the server binary — cleanup
-  # only imports llama_cpp.Llama — so skip building it. This MUST be
-  # exported (not just set on one pip line): `pip install -e .` and
-  # `uv sync` build llama-cpp-python as a project dependency, and run 5
-  # (41222863743) proved the inline-only version never reaches that
-  # build — it failed with the exact same link error.
-  export CMAKE_ARGS="-DLLAMA_BUILD_SERVER=OFF"
+  # arm64 only). So it builds from source.
+  #
+  # ROOT CAUSE of CI runs 5-6 (run 5 = 41222863743, run 6 = 41224744724):
+  # the link that fails is NOT the llama-server binary — llama-cpp-python
+  # never builds the server, and LLAMA_BUILD_SERVER already defaults OFF
+  # when llama.cpp is built as a subdirectory. The failing target is
+  # libllama-common (llama-cpp-python FORCE-builds it), which links
+  # cpp-httplib; llama.cpp's LLAMA_OPENSSL defaults ON, so CMake found the
+  # HOST's arm64 Homebrew OpenSSL 4.1.0 (/opt/homebrew/Cellar/openssl@4)
+  # while targeting x86_64, and ld ignored both arm64 dylibs:
+  #   ld: warning: ignoring file '.../libssl.dylib': found architecture
+  #   'arm64', required architecture 'x86_64'
+  #   ld: symbol(s) not found for architecture x86_64 (_X509_*, _SSL_* ...)
+  # Subvox never uses HTTPS inside llama.cpp (local GGUF inference only),
+  # so disable OpenSSL for the whole backend build. LLAMA_BUILD_SERVER=OFF
+  # is kept as a belt-and-braces guard. This MUST be exported (not just set
+  # on one pip line): `pip install -e .` and `uv sync` build
+  # llama-cpp-python as a project dependency, and run 5 proved the
+  # inline-only version never reaches that build.
+  export CMAKE_ARGS="-DLLAMA_OPENSSL=OFF -DLLAMA_BUILD_SERVER=OFF"
   if [[ "$ALLOW_CROSS" == "1" ]]; then
     # CROSS-COMPILE PATH (Apple Silicon host -> x86_64 target).
     # uv cannot force an interpreter to run under Rosetta: a venv made

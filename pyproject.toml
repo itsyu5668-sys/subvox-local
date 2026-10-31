@@ -13,7 +13,11 @@ dependencies = [
     # NOTE: anthropic / openai are deliberately NOT dependencies. No cloud calls.
     "av>=18.1.0",
     "mediapipe==0.10.21",
-    "llama-cpp-python>=0.3.0",
+    # Pinned: no Intel macOS wheel exists, so this builds from source and
+    # the build only works with CMAKE_ARGS="-DLLAMA_OPENSSL=OFF ..." (see
+    # packaging/build_app.sh). Pin the exact sdist that fix was verified
+    # against so a future upstream release cannot silently break CI.
+    "llama-cpp-python==0.3.36",
     "numpy<2",
     "opencv-python>=4.9,<4.11",
     "requests>=2.31",
