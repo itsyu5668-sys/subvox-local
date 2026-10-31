@@ -213,8 +213,15 @@ cp packaging/Info.plist "$APP/Contents/Info.plist"
 cp -R "$BUILD/dist/subvox-local" "$APP/Contents/Resources/subvox-backend"
 cp packaging/launcher.sh "$APP/Contents/Resources/launcher.sh"
 cp packaging/first_launch_downloader.py "$APP/Contents/Resources/first_launch_downloader.py"
+# First-launch diagnosis, for when the download looks stuck: the user
+# double-clicks diagnose-first-launch.command and gets plain-English
+# output (running? percent? which files are missing? last log lines?).
+cp packaging/diagnose-first-launch.sh "$APP/Contents/Resources/diagnose-first-launch.sh"
+cp packaging/diagnose-first-launch.command "$APP/Contents/Resources/diagnose-first-launch.command"
 chmod +x "$APP/Contents/MacOS/SubvoxLocal" \
          "$APP/Contents/Resources/launcher.sh" \
+         "$APP/Contents/Resources/diagnose-first-launch.sh" \
+         "$APP/Contents/Resources/diagnose-first-launch.command" \
          "$APP/Contents/Resources/subvox-backend/subvox-local"
 # Remove quarantine-prone junk if any crept in.
 find "$APP" -name ".DS_Store" -delete 2>/dev/null || true
@@ -269,15 +276,16 @@ echo "Done: $APP  ($(du -sh "$APP" | cut -f1))"
 echo "Next: ./packaging/build_dmg.sh"
 echo
 echo "KNOWN GAPS (do not ship until fixed):"
-echo "  * Live dictation bridge still missing: BackendBridge launches"
-echo "    'uv run python -m subvox_local' and never calls launcher.sh;"
-echo "    the Python JSON-lines streaming mode does not exist yet."
-echo "    Until that lands, test the backend by hand:"
-echo "      \"$APP/Contents/Resources/launcher.sh\" doctor"
-echo "  * Qwen3 GGUF file is chosen (unsloth/Qwen3-0.6B-GGUF,"
-echo "    Qwen3-0.6B-Q4_K_M.gguf) but first_launch_downloader.py still"
-echo "    has url=null for it — first launch will not download it."
-echo "  * License key accepts any non-empty key (placeholder);"
+echo "  * Live dictation is wired (dictate-stream JSON lines), but has"
+echo "    never run on a real Intel Mac — camera, paste, and latency"
+echo "    are still unmeasured there."
+echo "  * First-launch download: the Swift app now starts the downloader"
+echo "    from the bundle (AppState.downloaderScriptURL), shows the"
+echo "    Models tab on first launch, auto-retries stalls, and the .app"
+echo "    has a Dock icon + reopen-to-front. Still untested on a Mac:"
+echo "    if the download still looks stuck, run the bundled"
+echo "    diagnose-first-launch.command and read its verdict."
+echo "  * License key is format + checksum only (not crypto security);"
 echo "    CHECKOUT_URL is empty. No real activation yet."
 echo "  * App is UNSIGNED. See packaging/README.md signing checklist"
 echo "    before giving the .dmg to anyone else."
