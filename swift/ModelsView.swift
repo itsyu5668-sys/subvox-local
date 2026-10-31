@@ -1,15 +1,17 @@
 // ModelsView.swift — model inventory, status, and first-launch download.
 //
 // Sizes below come from MODELS.md (generated from the actual files in
-// models/ on 2026-10-31). The Qwen GGUF sizes are NOT in MODELS.md —
-// the repo still ships MLX Qwen weights — so they are marked TBD, not
-// guessed. The Intel build replaces MLX Qwen with GGUF Qwen via
-// llama.cpp; until the GGUF files are chosen and downloaded, their size
-// and URL are unknown and this view says so.
+// models/ on 2026-10-31). The Qwen GGUF 0.6B file IS chosen and
+// verified: unsloth/Qwen3-0.6B-GGUF, Qwen3-0.6B-Q4_K_M.gguf,
+// 396,705,472 bytes, sha256 ac2d9771… — see MODELS.md and
+// packaging/first_launch_downloader.py. The 1.7B GGUF fallback has
+// NOT been downloaded, so its size stays TBD, not guessed.
 //
-// Models are NEVER bundled inside the .app. They download on first
-// launch, with resume, into the repo's models/ folder (see
-// scripts/download-models.sh for the canonical list).
+// Models are NEVER bundled inside the .app. Core models (~1.62 GB)
+// download on first launch, with resume, into
+// ~/Library/Application Support/Subvox Local/models/.
+// The AV whisper model (1.8 GB) and AV-HuBERT backup (1.9 GB) are
+// on-demand only — see docs/SEAMLESS_FLOW.md §3 for the size math.
 //
 // UNTESTED ON INTEL MAC: doctor parsing, download progress, and resume
 // have never run on a real Mac in this build.
@@ -97,12 +99,12 @@ enum ModelCatalogue {
             id: "qwen-0.6b",
             name: "Qwen3-0.6B GGUF",
             role: "Offline cleanup — fixes homophenes, casing, punctuation",
-            sizeMB: nil,
-            sizeNote: "TBD — GGUF file not chosen yet",
-            source: "Qwen3 (Alibaba), GGUF via llama.cpp — repo still ships the MLX build (335.5 MB weights, mlx-community/Qwen3-0.6B-4bit)",
-            url: nil, // TODO (Francis): pick the GGUF repo/file and paste its URL here. Do not guess one.
-            relativePath: "models/qwen3-0.6b-gguf/",
-            doctorLabel: nil, // doctor checks the MLX dir today, not GGUF — update when the GGUF path lands
+            sizeMB: 396.7,
+            sizeNote: "396.7 MB",
+            source: "unsloth/Qwen3-0.6B-GGUF (Hugging Face), sha256 ac2d9771…",
+            url: URL(string: "https://huggingface.co/unsloth/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q4_K_M.gguf"),
+            relativePath: "models/qwen3-0.6b-gguf/Qwen3-0.6B-Q4_K_M.gguf",
+            doctorLabel: "qwen3-0.6b-gguf/Qwen3-0.6B-Q4_K_M.gguf",
             licenseNote: "Apache 2.0 (Qwen3)",
             required: true
         ),
@@ -111,11 +113,11 @@ enum ModelCatalogue {
             name: "Qwen3-1.7B GGUF",
             role: "Cleanup fallback — more accurate, slower on Intel CPU",
             sizeMB: nil,
-            sizeNote: "TBD — GGUF file not chosen yet",
-            source: "Qwen3 (Alibaba), GGUF via llama.cpp — repo still ships the MLX build (968.1 MB weights, mlx-community/Qwen3-1.7B-4bit)",
-            url: nil, // TODO (Francis): pick the GGUF repo/file and paste its URL here. Do not guess one.
-            relativePath: "models/qwen3-1.7b-gguf/",
-            doctorLabel: nil,
+            sizeNote: "TBD — file not downloaded, size not verified",
+            source: "unsloth/Qwen3-1.7B-GGUF (Hugging Face), file Qwen3-1.7B-Q4_K_M.gguf — not downloaded yet, do not quote a size",
+            url: URL(string: "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf"),
+            relativePath: "models/qwen3-1.7b-gguf/Qwen3-1.7B-Q4_K_M.gguf",
+            doctorLabel: "qwen3-1.7b-gguf/Qwen3-1.7B-Q4_K_M.gguf",
             licenseNote: "Apache 2.0 (Qwen3)",
             required: false
         ),
@@ -148,11 +150,19 @@ enum ModelCatalogue {
     ]
 
     /// Known on-disk total for the models with recorded sizes.
-    /// The MLX Qwen dirs add ~351 MB (0.6B) + ~984 MB (1.7B) — the repo
-    /// total in MODELS.md is 6.24 GB. The Intel GGUF build will differ;
-    /// do not quote 6.24 GB as the Intel total.
+    /// Core first-run set (required entries): 1,001.9 + 215.1 + 0.3 +
+    /// 3.8 + 396.7 = 1,617.8 MB (~1.62 GB). The full repo total
+    /// (MODELS.md) is ~6.62 GB — that includes the 1.8 GB AV model,
+    /// the 1.9 GB AV-HuBERT backup, and the MLX Qwen dirs, none of
+    /// which download on first launch. Do not quote 6.62 GB as the
+    /// first-run download.
     static var knownSizeMB: Double {
         entries.compactMap { $0.sizeMB }.reduce(0, +)
+    }
+
+    /// First-run (required) total only.
+    static var coreSizeMB: Double {
+        entries.filter { $0.required }.compactMap { $0.sizeMB }.reduce(0, +)
     }
 }
 
@@ -273,7 +283,7 @@ struct ModelsView: View {
                 .foregroundStyle(Color.dunaWarmAsh)
             HStack(spacing: 8) {
                 LocalOnlyBadge()
-                Text("Known sizes total \(String(format: "%.1f", ModelCatalogue.knownSizeMB / 1000)) GB — Qwen GGUF sizes still TBD.")
+                Text("First-run download \(String(format: "%.2f", ModelCatalogue.coreSizeMB / 1000)) GB (core set) — the 1.8 GB whisper model and 1.9 GB backup are on-demand only.")
                     .font(DunaFont.body(13))
                     .foregroundStyle(Color.dunaWarmAsh)
             }
@@ -335,28 +345,34 @@ struct ModelsView: View {
     // MARK: Download
 
     private var downloadCard: some View {
-        DunaCard {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("First-launch download")
-                    .font(DunaFont.headline(17))
-                    .foregroundStyle(Color.dunaInk)
-                Text("Models are not in the .app. Download them once, with resume — if a download stops, re-running picks up where it left off. The Qwen GGUF rows have no URL yet and cannot download until the GGUF files are chosen.")
-                    .font(DunaFont.body(14))
-                    .foregroundStyle(Color.dunaWarmAsh)
-                Button("Download missing models") {
-                    Task { await downloadMissing() }
-                }
-                .buttonStyle(DunaPrimaryButtonStyle())
-                .disabled(appState.downloadingModels)
-                if appState.downloadingModels {
-                    Text("Downloading… per-model progress shows on each row below.")
-                        .font(DunaFont.body(13))
+        VStack(alignment: .leading, spacing: 12) {
+            // Live bar: MB downloaded / total, speed, time left, pause/resume.
+            // Retry is wired in: stall / error shows why, with a Retry button.
+            DownloadProgressCard(monitor: appState.downloadMonitor,
+                                 onRetry: { appState.retryBackgroundDownload() })
+            DunaCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("First-launch download")
+                        .font(DunaFont.headline(17))
+                        .foregroundStyle(Color.dunaInk)
+                    Text("Models are not in the .app. Download them once, with resume — if a download stops, re-running picks up where it left off. Core set is about 1.62 GB; the whisper model and backup encoder are on-demand only.")
+                        .font(DunaFont.body(14))
                         .foregroundStyle(Color.dunaWarmAsh)
-                }
-                if let error = downloader.error {
-                    Text(error)
-                        .font(DunaFont.body(13))
-                        .foregroundStyle(Color.dunaWarmAsh)
+                    if let error = appState.downloadError {
+                        Text(error)
+                            .font(DunaFont.body(14))
+                            .foregroundStyle(Color.dunaInk)
+                    }
+                    Button(appState.backgroundDownloadStarted ? "Download running in background" : (appState.downloadError == nil ? "Download missing models in background" : "Retry download")) {
+                        appState.retryBackgroundDownload()
+                    }
+                    .buttonStyle(DunaPrimaryButtonStyle())
+                    .disabled(appState.backgroundDownloadStarted)
+                    if let error = downloader.error {
+                        Text(error)
+                            .font(DunaFont.body(13))
+                            .foregroundStyle(Color.dunaWarmAsh)
+                    }
                 }
             }
         }
