@@ -83,9 +83,12 @@ struct OnboardingView: View {
                     Button("Continue") { step += 1 }
                         .buttonStyle(DunaPrimaryButtonStyle())
                 } else {
-                    Button("Start dictating") {
+                    // Train First: the first screen after onboarding is
+                    // Setup, not Dictate — stock Auto-AVSR is not accurate
+                    // on a new face until the personal LoRA has trained.
+                    Button("Start training") {
                         appState.finishOnboarding()
-                        appState.tab = .dictate
+                        appState.tab = .setup
                     }
                     .buttonStyle(DunaPrimaryButtonStyle())
                 }
@@ -177,12 +180,18 @@ struct OnboardingView: View {
 
     private var modelsStep: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Download the models")
+            Text("Download the models — in the background")
                 .font(DunaFont.headline(17))
                 .foregroundStyle(Color.dunaInk)
-            Text("Models are not inside the app — they download once, with resume. The lip reader is about 1 GB, the language model about 215 MB, the face tracker about 4 MB. The Qwen cleanup models (GGUF) are still TBD and cannot download until their files are chosen.")
+            Text("Models are not inside the app — they download once, with resume, while you set up. You do not wait for them: tap Continue and do the Train First setup on the next step while this runs. Recording your sentences works while downloading; training waits until the lip reader has landed.")
                 .font(DunaFont.body(15))
                 .foregroundStyle(Color.dunaGraphite)
+            // Live progress: MB downloaded / total, speed, time left.
+            // Retry is wired in: if the download stalls or fails, the
+            // card shows why and offers Retry instead of a frozen bar.
+            DownloadProgressCard(monitor: appState.downloadMonitor,
+                                 onRetry: { appState.retryBackgroundDownload() })
+            // Core set only — what downloads, and what does not.
             ForEach(ModelCatalogue.entries.filter { $0.required }) { entry in
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
@@ -205,22 +214,32 @@ struct OnboardingView: View {
                     }
                 }
             }
-            Text("Per-model progress appears here and in Models. You can also run the canonical script from the repo: bash scripts/download-models.sh")
+            Text("Core set, about 1.62 GB total: lip reader 1,001.9 MB, language model 215.1 MB, tokenizer 0.3 MB, face tracker 3.8 MB, Qwen cleanup (GGUF) 396.7 MB. The 1.8 GB whisper model and 1.9 GB backup encoder do NOT download now — only if you turn on whisper mode later. Per-model progress also appears in Models.")
                 .font(DunaFont.body(13))
                 .foregroundStyle(Color.dunaWarmAsh)
+            if let error = appState.downloadError {
+                Text(error)
+                    .font(DunaFont.body(14))
+                    .foregroundStyle(Color.dunaInk)
+            }
+            Button(appState.backgroundDownloadStarted ? "Download running in background" : (appState.downloadError == nil ? "Start download in background" : "Retry download")) {
+                appState.retryBackgroundDownload()
+            }
+            .buttonStyle(DunaPrimaryButtonStyle())
+            .disabled(appState.backgroundDownloadStarted)
         }
     }
 
     private var setupStep: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Teach it your mouth — 2 minutes")
+            Text("Teach it your mouth — train first")
                 .font(DunaFont.headline(17))
                 .foregroundStyle(Color.dunaInk)
-            Text("Mouth 6 short sentences. A small adapter learns your lip shapes and is kept only if it reads you better than the stock model. You can do this now or later from Setup.")
+            Text("Mouth 10 short sentences, 3 takes each. A small adapter learns your lip shapes and is kept only if it reads you better than the stock model. Recording takes a few minutes; training takes 10+ minutes on this Intel i5 CPU — the app shows the measured time, never an estimate. You can do this now or later from Setup, but dictation waits until it has run.")
                 .font(DunaFont.body(15))
                 .foregroundStyle(Color.dunaGraphite)
-            ForEach(SetupSentences.quick6, id: \.self) { sentence in
-                Text("•  \(sentence)")
+            ForEach(SetupSentences.fast10, id: \.self) { sentence in
+                Text("•  \(sentence)  —  3 takes")
                     .font(DunaFont.body(14))
                     .foregroundStyle(Color.dunaGraphite)
             }
@@ -234,10 +253,10 @@ struct OnboardingView: View {
 
     private var trialStep: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("7 days free, then a license")
+            Text("7 days free, then $\(Pricing.monthlyUSD)/month")
                 .font(DunaFont.headline(17))
                 .foregroundStyle(Color.dunaInk)
-            Text("Your free trial is \(Pricing.trialDays) days, full dictation, no card. After that it is $\(Pricing.monthlyUSD)/month or $\(Pricing.lifetimeUSD) once, activated with a license key. No audio is ever sent — activation is an offline key file.")
+            Text("Your free trial is \(Pricing.trialDays) days, full dictation, no card. The clock starts only once the models are ready and you dictate for the first time — not while they download. After that it is $\(Pricing.monthlyUSD)/month, billed monthly via Stripe, activated with a license key. A $\(Pricing.lifetimeUSD) one-time option exists as a secondary upsell, not the main plan. No audio is ever sent — activation is an offline key file.")
                 .font(DunaFont.body(15))
                 .foregroundStyle(Color.dunaGraphite)
             LicenseBlockerBanner()
