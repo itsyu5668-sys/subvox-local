@@ -29,6 +29,13 @@ Then install it like any Mac app: open the `.dmg`, drag
 
 ### Time estimates (honest)
 
+**torch on Intel macOS: PyTorch stopped shipping macOS x86_64 wheels
+after 2.2.2.** `torch>=2.4` is arm64/Linux only — on an Intel Mac pip
+says `No matching distribution found for torch>=2.4`. `pyproject.toml`
+therefore pins `torch==2.2.2` on `darwin + x86_64` (found 2026-10-31
+in CI run 41220859738). Do not "fix" the pin back to `>=2.4` without
+checking PyPI for an x86_64 macOS wheel first.
+
 | Step | Time |
 |---|---|
 | `build_app.sh` first run (uv sync + torch + PyInstaller + swiftc) | ~10–30 min (mostly downloading torch) |

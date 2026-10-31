@@ -19,7 +19,12 @@ dependencies = [
     "requests>=2.31",
     "sentencepiece>=0.2.2",
     "sounddevice>=0.5.6",
-    "torch>=2.4",  # CPU build on Intel Mac (no MPS/CUDA there): `uv sync` installs the CPU wheel by default on x86_64 macOS
+    # torch on Intel macOS: PyTorch stopped shipping macOS x86_64 wheels
+    # after 2.2.2 (torch>=2.4 is arm64/Linux only — pip reports "No matching
+    # distribution found for torch>=2.4" on x86_64 macOS). So Intel macOS
+    # is pinned to the last Intel wheel, 2.2.2; everything else keeps >=2.4.
+    "torch==2.2.2; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+    "torch>=2.4; sys_platform != 'darwin' or platform_machine != 'x86_64'",  # CPU build on Intel Mac (no MPS/CUDA there): `uv sync` installs the CPU wheel by default on x86_64 macOS
     # macOS menu-bar / hotkey / paste (darwin only)
     "pyobjc-framework-avfoundation>=10.3; sys_platform == 'darwin'",
     "pyobjc-framework-cocoa>=10.3; sys_platform == 'darwin'",
