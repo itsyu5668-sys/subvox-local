@@ -12,8 +12,12 @@ Run it once by hand on the Intel Mac before shipping:
     python3 packaging/first_launch_downloader.py --models-dir /tmp/sv-models-test
 
 What it does:
-  * Core models only by default (~1.22 GB): Auto-AVSR visual-only,
-    subword LM, SentencePiece tokenizer, MediaPipe FaceLandmarker.
+  * Core models only by default (~1.62 GB total for usable dictation):
+    the VSR core set (~1.22 GB: Auto-AVSR visual-only, subword LM,
+    SentencePiece tokenizer, MediaPipe FaceLandmarker) PLUS the
+    Qwen3-0.6B Q4_K_M GGUF cleanup model (~396.7 MB, unsloth,
+    SHA-256 verified). Without the GGUF file, cleanup falls back to
+    offline rules only — so it is core, not optional.
   * Resumable: interrupted downloads continue from the .part file
     (HTTP Range). Re-running skips files already present with a
     matching SHA-256.
@@ -25,8 +29,14 @@ What it does:
     ~/Library/Application Support/Subvox Local/download-progress.json).
     Fields: current_file, downloaded_bytes, total_bytes, percent,
     overall_downloaded_bytes, overall_total_bytes, overall_percent,
+    bytes_per_sec, eta_seconds, overall_eta_seconds,
     status (downloading | paused | cancelled | done | error),
     models_done, models_total.
+    bytes_per_sec is an exponentially-weighted moving average of the
+    download rate; eta_seconds is (remaining bytes / bytes_per_sec)
+    and is 0 / null until enough data has been seen to estimate it.
+    The Swift UI (DownloadProgressMonitor) polls this file once a
+    second — the downloader never talks to the UI directly.
   * Pause / cancel: create the pause file or cancel file named in
     --pause-file / --cancel-file (defaults live next to the progress
     file). The downloader checks them between chunks and stops cleanly;
@@ -37,18 +47,12 @@ What it does NOT download (on purpose):
     Macs, so those weights are dead weight on this machine. They are
     listed in the manifest with group "qwen-mlx" and skipped unless
     --include-qwen-mlx is passed (only useful on Apple Silicon).
-  * Qwen3 GGUF (llama.cpp) — the Intel cleanup model. The file IS
-    chosen now: unsloth/Qwen3-0.6B-GGUF, Qwen3-0.6B-Q4_K_M.gguf, and
-    src/subvox_local/cleanup.py has the llama.cpp branch. BUT this
-    downloader still has the GGUF manifest entry as url=null and
-    skips it with a warning — the real URL + SHA-256 have not been
-    added here yet. Until that entry lands, Intel cleanup falls back
-    to the offline rules in cleanup.py (basic_cleanup) — dictation
-    still works, the LLM homophene fix does not. DO NOT ship a
-    "one-click install" claiming full cleanup until that entry has
-    a real URL + SHA.
   * AV whisper model (1.8 GB) and AV-HuBERT backup (1.9 GB) are
-    optional: --include-av / --include-avhubert.
+    optional on-demand downloads only: --include-av / --include-avhubert.
+    Shipping them by default would take first-run download from
+    ~1.62 GB to ~5.33 GB for features most users never touch
+    (whisper mode, backup encoder). See docs/SEAMLESS_FLOW.md §3
+    for the size math.
 
 All URLs below are copied verbatim from scripts/download-models.sh.
 No URL was invented.
@@ -201,12 +205,18 @@ MANIFEST = [
      "dest": "qwen3-1.7b-4bit-mlx/special_tokens_map.json",
      "sha256": "76862e765266b85aa9459767e33cbaf13970f327a0e88d1c65846c2ddd3a1ecd",
      "size_mb": 0.01},
-    # ---- Qwen3 GGUF (Intel cleanup): NOT YET CHOSEN — see module docstring ----
+    # ---- Qwen3 GGUF (Intel cleanup) — CORE, downloaded by default ----
+    # Chosen 2026-10-31, verified in this repo (MODELS.md):
+    # unsloth/Qwen3-0.6B-GGUF, file Qwen3-0.6B-Q4_K_M.gguf,
+    # 396,705,472 bytes, sha256 ac2d9771... (full hash below).
+    # NOTE the exact filename case: Qwen3-0.6B-Q4_K_M.gguf — the
+    # cleanup code (src/subvox_local/paths.py QWEN_06B_GGUF) looks
+    # for exactly this name. Do not lowercase it.
     {"name": "Qwen3-0.6B GGUF (llama.cpp, Intel cleanup)", "group": "qwen-gguf",
-     "url": None,
-     "dest": "qwen3-0.6b-gguf/qwen3-0.6b-q4_k_m.gguf",
-     "sha256": None,
-     "size_mb": None},
+     "url": f"{HF}/unsloth/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q4_K_M.gguf",
+     "dest": "qwen3-0.6b-gguf/Qwen3-0.6B-Q4_K_M.gguf",
+     "sha256": "ac2d97712095a558e31573f62f466a3f9d93990898b0ec79d7c974c1780d524a",
+     "size_mb": 396.7},
 ]
 
 CHUNK = 1024 * 1024  # 1 MB chunks; pause/cancel checked between chunks
@@ -240,6 +250,12 @@ class Downloader:
         self.models_done = 0
         self.models_total = 0
         self._cancelled = False
+        self._error_message = ""
+        # Download-rate tracking for ETA (see _write_progress):
+        # EWMA of bytes/sec, updated once per progress write (1 Hz).
+        self._rate_bps = 0.0
+        self._last_write_time = 0.0
+        self._last_overall_done = 0
         signal.signal(signal.SIGINT, self._on_sigint)
         try:
             signal.signal(signal.SIGTERM, self._on_sigint)
@@ -251,10 +267,30 @@ class Downloader:
 
     # -- progress ------------------------------------------------------
     def _write_progress(self, status: str, current: str = "",
-                        downloaded: int = 0, total: int = 0) -> None:
+                        downloaded: int = 0, total: int = 0,
+                        error_message: str = "") -> None:
+        if error_message:
+            self._error_message = error_message
         overall_pct = (100.0 * self.overall_done / self.overall_total
                        if self.overall_total else 0.0)
         pct = 100.0 * downloaded / total if total else 0.0
+        # Rate + ETA: EWMA over 1-second writes. First write has no
+        # rate yet (rate 0 -> ETA null, not a fake number).
+        now = time.time()
+        if self._last_write_time:
+            dt = max(now - self._last_write_time, 0.001)
+            instant = (self.overall_done - self._last_overall_done) / dt
+            alpha = 0.3
+            self._rate_bps = (alpha * instant + (1 - alpha) * self._rate_bps
+                              if self._rate_bps else instant)
+        self._last_write_time = now
+        self._last_overall_done = self.overall_done
+        rate = self._rate_bps
+        eta_file = (int((total - downloaded) / rate) if rate > 0 and total > downloaded
+                    else None)
+        eta_overall = (int((self.overall_total - self.overall_done) / rate)
+                       if rate > 0 and self.overall_total > self.overall_done
+                       else None)
         data = {
             "status": status,
             "current_file": current,
@@ -264,16 +300,27 @@ class Downloader:
             "overall_downloaded_bytes": self.overall_done,
             "overall_total_bytes": self.overall_total,
             "overall_percent": round(overall_pct, 1),
+            "bytes_per_sec": round(rate, 1),
+            "eta_seconds": eta_file,
+            "overall_eta_seconds": eta_overall,
             "models_done": self.models_done,
             "models_total": self.models_total,
             "updated": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            # Plain-English failure reason, shown in the app UI (not
+            # only in the log). Empty unless status == "error".
+            # The Swift monitor treats a progress file whose "updated"
+            # timestamp is >60s old while status is "downloading" as
+            # stalled — that is how a frozen download is detected.
+            "error_message": self._error_message,
         }
         tmp = self.progress_file + ".tmp"
         with open(tmp, "w") as f:
             json.dump(data, f, indent=2)
         os.replace(tmp, self.progress_file)
+        eta_txt = f" ETA {eta_overall}s" if eta_overall is not None else ""
         print(f"PROGRESS {current} {downloaded}/{total} ({pct:.1f}%) "
-              f"overall {overall_pct:.1f}% [{status}]", flush=True)
+              f"overall {overall_pct:.1f}% {rate / 1e6:.1f} MB/s{eta_txt} [{status}]",
+              flush=True)
 
     def _check_pause_cancel(self) -> None:
         if self._cancelled or os.path.exists(self.cancel_file):
@@ -383,16 +430,38 @@ class Downloader:
                           "file is chosen and the cleanup branch lands.")
                     self.models_total -= 1
                     continue
-                ok = self._download_one(entry)
+                # Network errors (wifi drop, Hugging Face timeout, HTTP
+                # error) used to crash this process with a traceback and
+                # leave the progress file stuck on "downloading" forever,
+                # so the app showed a frozen percent and no error.
+                # Now they are caught, written to the progress file as
+                # status "error" with a plain-English reason, retried
+                # once after 5s, and only then fail. Completed files
+                # are kept and verified files are skipped on re-run.
+                ok = False
+                last_error = ""
+                for attempt in (1, 2):
+                    try:
+                        ok = self._download_one(entry)
+                    except Exception as e:  # URLError, HTTPError, timeout, OSError
+                        last_error = f"{type(e).__name__}: {e}"
+                        print(f"Download error for {entry['dest']} "
+                              f"(attempt {attempt}): {last_error}")
+                        ok = False
+                    if ok:
+                        break
+                    if attempt == 1:
+                        print("Waiting 5s, then retrying once…")
+                        time.sleep(5)
                 if not ok:
-                    # One retry from scratch (hash mismatch or transient error).
-                    print(f"Retrying {entry['dest']} once…")
-                    ok = self._download_one(entry)
-                if not ok:
-                    self._write_progress("error", entry["dest"])
-                    print(f"FAILED: {entry['dest']} — fix the network or the "
-                          "URL, then re-run; completed files are kept and "
-                          "verified files are skipped.")
+                    reason = (last_error or
+                              f"could not download {entry['dest']} "
+                              "(hash check failed twice)")
+                    self._write_progress("error", entry["dest"],
+                                         error_message=reason)
+                    print(f"FAILED: {entry['dest']} — {reason}. Check "
+                          "your internet, then re-open the app; completed "
+                          "files are kept and verified files are skipped.")
                     return 1
         except (Cancelled, KeyboardInterrupt):
             self._write_progress("cancelled")
@@ -402,6 +471,12 @@ class Downloader:
         except Paused:
             self._write_progress("paused")
             return 3
+        except Exception as e:  # never die with a stale "downloading" file
+            reason = f"{type(e).__name__}: {e}"
+            self._write_progress("error", error_message=reason)
+            print(f"FAILED unexpectedly: {reason}. Re-open the app to "
+                  "resume; completed files are kept.")
+            return 1
         self._write_progress("done")
         print(f"Done: {self.models_done}/{self.models_total} files verified "
               f"in {self.models_dir}")
@@ -409,7 +484,11 @@ class Downloader:
 
 
 def select_entries(args) -> list[dict]:
-    groups = {"core"}
+    # Core by default: VSR core set + GGUF cleanup (~1.62 GB total).
+    # The GGUF file is core, not optional — without it cleanup falls
+    # back to offline rules. --include-qwen-gguf is kept as a no-op
+    # flag for scripts that already pass it.
+    groups = {"core", "qwen-gguf"}
     if args.include_av:
         groups.add("av")
     if args.include_avhubert:
@@ -418,11 +497,7 @@ def select_entries(args) -> list[dict]:
         groups.add("qwen-mlx")
     else:
         print("NOTE: Qwen3 MLX files skipped (MLX does not run on Intel Macs).")
-    entries = [e for e in MANIFEST if e["group"] in groups]
-    if args.include_qwen_gguf:
-        # Included only so the warning is visible; it has no URL yet.
-        entries += [e for e in MANIFEST if e["group"] == "qwen-gguf"]
-    return entries
+    return [e for e in MANIFEST if e["group"] in groups]
 
 
 def main(argv=None) -> int:
@@ -442,8 +517,9 @@ def main(argv=None) -> int:
                    help="also download MLX Qwen files (useless on Intel, "
                         "only for Apple Silicon)")
     p.add_argument("--include-qwen-gguf", action="store_true",
-                   help="include the GGUF entry (currently has no URL; "
-                        "prints a warning and skips)")
+                   help="no-op: the GGUF cleanup model is core and is "
+                        "downloaded by default. Kept so older scripts "
+                        "that pass the flag keep working.")
     p.add_argument("--list", action="store_true",
                    help="print the manifest and exit")
     p.add_argument("--verify-only", action="store_true",
