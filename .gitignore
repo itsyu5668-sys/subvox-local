@@ -1,0 +1,6 @@
+models/
+__pycache__/
+.pytest_cache/
+build/
+*.dmg
+*.DS_Store
