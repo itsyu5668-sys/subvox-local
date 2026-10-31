@@ -26,10 +26,31 @@
 # - A green build does NOT mean the app works end to end. Known gaps
 #   (see packaging/README.md): the live-dictation bridge is still
 #   missing (BackendBridge never calls launcher.sh, no JSON-lines
-#   streaming mode in the Python backend), the first-launch downloader
-#   still has url=null for the Qwen GGUF model, and the license key
-#   accepts any non-empty key. The CI smoke test only proves the
-#   backend binary starts.
+#   streaming mode in the Python backend). FIXED since this header was
+#   written: the first-launch downloader now has the real Qwen GGUF
+#   URL + SHA-256 (core set is 1.62 GB), and license keys now need the
+#   SUBVOX-XXXX format + checksum (format check only, not crypto
+#   security). The CI smoke test only proves the backend binary starts.
+# - FAILURE HISTORY (so the next person does not re-diagnose it):
+#   run 5 (41222863743) failed building llama-cpp-python 0.3.36 from
+#   source: ld: symbol(s) not found for architecture x86_64 (_X509_*,
+#   _SSL_*). Root cause was NOT the llama-server binary (its commit
+#   message said so — wrong): CMake found the host's arm64 Homebrew
+#   OpenSSL 4.1.0 while targeting x86_64, and the link failed in
+#   libllama-common's cpp-httplib TLS code. Fix, in build_app.sh:
+#   export CMAKE_ARGS="-DLLAMA_OPENSSL=OFF -DLLAMA_BUILD_SERVER=OFF"
+#   BEFORE any pip install / uv sync (run 10 proved the wheel then
+#   builds: "Successfully built subvox-local llama-cpp-python").
+#   Run 10 then failed in swiftc only:
+#   swift/PaywallView.swift:238:82: error: extra argument 'specifier'
+#   in call. Run 11 (the fix for that, dropping the specifier) went
+#   GREEN 2026-10-31 19:10 UTC: first .dmg artifact, ~434 MB
+#   (subvox-local-intel-dmg, run 41231078252).
+# - The retired hand-built script .app (CFBundleExecutable = a bash
+#   script) opened Script Editor on double-click. Both build_app.sh
+#   (step 4b) and the "Verify CFBundleExecutable" step below now fail
+#   the build if the executable is not a Mach-O 64-bit x86_64 binary.
+#   Never ship a script as CFBundleExecutable again.
 # - set -e is on everywhere (build scripts use `set -euo pipefail`);
 #   nothing here swallows errors or fakes success.
 
@@ -97,6 +118,24 @@ jobs:
           file "build/Subvox Local.app/Contents/Resources/subvox-backend/subvox-local"
           lipo -archs "build/Subvox Local.app/Contents/MacOS/SubvoxLocal" | grep -q x86_64
           echo "x86_64 arch confirmed."
+
+      - name: Verify CFBundleExecutable is a compiled binary (never a script)
+        run: |
+          set -euo pipefail
+          APP="build/Subvox Local.app"
+          EXEC_NAME="$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP/Contents/Info.plist")"
+          echo "CFBundleExecutable: $EXEC_NAME"
+          EXEC_PATH="$APP/Contents/MacOS/$EXEC_NAME"
+          file "$EXEC_PATH"
+          if ! file "$EXEC_PATH" | grep -q "Mach-O 64-bit executable x86_64"; then
+            echo "ERROR: $EXEC_PATH is not a Mach-O 64-bit x86_64 binary."
+            echo "A script as CFBundleExecutable opens Script Editor on"
+            echo "double-click (the retired click-to-open .app bug)."
+            echo "Fix the swiftc step; never ship a script as the executable."
+            echo "Fallback: packaging/launcher-swift/README.md"
+            exit 1
+          fi
+          echo "CFBundleExecutable is a compiled x86_64 binary."
 
       - name: Build Subvox Local.dmg
         run: ./packaging/build_dmg.sh
