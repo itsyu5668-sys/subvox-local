@@ -7,9 +7,15 @@
 # It does, in order:
 #   1. Makes sure models exist in ~/Library/Application Support/Subvox Local/models/
 #      — if the core models are missing, it starts the first-launch
-#      downloader (stdlib python3, resumable) in the background and waits
-#      for it, logging to ~/Library/Logs/SubvoxLocal/first-launch.log.
-#      The Swift UI reads download-progress.json for the progress bar.
+#      downloader (stdlib python3, resumable) in the BACKGROUND and
+#      returns immediately. It NEVER waits for the download: the old
+#      version ran the downloader in the foreground, so the app window
+#      could not open until ~1.62 GB had downloaded (10-30 min on slow
+#      wifi) and the user saw a "downloading" popup and then nothing.
+#      The Swift UI reads download-progress.json for the progress bar
+#      and starts the same downloader itself on first launch; this
+#      script is the fallback / hand-test path only.
+#      Logs: ~/Library/Logs/SubvoxLocal/first-launch.log.
 #   2. Symlinks <bundle>/Resources/subvox-backend/models -> the user
 #      models dir, because src/subvox_local/paths.py resolves MODELS
 #      from the bundle root (not from Application Support). No backend
@@ -42,19 +48,26 @@ for f in vsr/model.pth vsr/model.json lm/model.pth lm/model.json \
 done
 
 if [[ "$need_download" == "1" ]]; then
-  echo "Core models missing — starting first-launch download (~1.22 GB)."
+  echo "Core models missing — starting first-launch download (~1.62 GB) in the background."
   echo "Progress: $PROGRESS_FILE"
-  # --include-qwen-gguf prints the no-URL-yet warning; it is harmless
-  # and keeps the gap visible in the log until a GGUF file is chosen.
-  dl_status=0
-  /usr/bin/python3 "$DOWNLOADER" --models-dir "$MODELS_DIR" \
-      --progress-file "$PROGRESS_FILE" --include-qwen-gguf || dl_status=$?
-  if [[ "$dl_status" -ne 0 ]]; then
-    echo "ERROR: model download exited $dl_status (2 = cancelled, 1 = failed)."
-    echo "Re-run this launcher (or the downloader directly) to resume — completed files are kept."
-    exit "$dl_status"
+  echo "Log: $LOG_DIR/first-launch.log"
+  # Already running? Do not start a second copy — re-running the app
+  # while a download is in flight used to look like "nothing happens".
+  # Check the PID file first; if that process is alive, just report it.
+  PID_FILE="$APP_SUPPORT/download.pid"
+  if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE" 2>/dev/null)" 2>/dev/null; then
+    echo "Download already running (PID $(cat "$PID_FILE")). Not starting a second copy."
+    echo "Watch progress in the app's Models tab, or run: bash packaging/diagnose-first-launch.sh"
+  else
+    rm -f "$APP_SUPPORT/download.cancel" "$APP_SUPPORT/download.pause"
+    nohup /usr/bin/python3 "$DOWNLOADER" --models-dir "$MODELS_DIR" \
+        --progress-file "$PROGRESS_FILE" --include-qwen-gguf \
+        >>"$LOG_DIR/first-launch.log" 2>&1 &
+    echo $! > "$PID_FILE"
+    echo "Download started in background (PID $(cat "$PID_FILE"))."
+    echo "The app window opens now — training waits until the models land,"
+    echo "but recording your sentences works while downloading."
   fi
-  echo "Model download finished; verifying…"
 fi
 
 # 2. Symlink so paths.py (bundle-root-relative MODELS) finds them.
