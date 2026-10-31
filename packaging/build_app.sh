@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
 # Subvox Local — one-command .app build for an INTEL Mac.
-#   ./packaging/build_app.sh [--skip-backend] [--skip-swift]
+#   ./packaging/build_app.sh [--skip-backend] [--skip-swift] [--allow-cross]
 #
 # Run on Francis's Intel Mac (macOS 14+, Xcode Command Line Tools,
-# Python 3.11–3.12, uv). NOT on Linux, NOT on Apple Silicon.
-# (Apple Silicon: ./setup_apple_silicon.sh — different backend, MLX.)
+# Python 3.11–3.12, uv). NOT on Linux, NOT on Apple Silicon — unless
+# --allow-cross is passed (CI only): on an Apple Silicon Mac it
+# cross-compiles the x86_64 app under Rosetta 2. That path needs
+# X86_64_PYTHON set to an x86_64 python3.12 (e.g. the python.org
+# universal2 install run under `arch -x86_64`) and is UNTESTED —
+# it exists because GitHub removed the macos-13 Intel runner
+# (see .github/workflows/build-macos-intel.yml).
+# (Apple Silicon native: ./setup_apple_silicon.sh — different backend, MLX.)
 #
 # What it does, in order:
 #   1. Checks: Darwin, x86_64 Intel, xcode-select, python3, uv.
@@ -38,12 +44,13 @@ ROOT="$PWD"
 BUILD="$ROOT/build"
 APP="$BUILD/Subvox Local.app"
 
-SKIP_BACKEND=0; SKIP_SWIFT=0
+SKIP_BACKEND=0; SKIP_SWIFT=0; ALLOW_CROSS=0
 for a in "$@"; do
   case "$a" in
     --skip-backend) SKIP_BACKEND=1 ;;
     --skip-swift)   SKIP_SWIFT=1 ;;
-    *) echo "Unknown flag: $a (use --skip-backend / --skip-swift)"; exit 2 ;;
+    --allow-cross)  ALLOW_CROSS=1 ;;
+    *) echo "Unknown flag: $a (use --skip-backend / --skip-swift / --allow-cross)"; exit 2 ;;
   esac
 done
 
@@ -56,12 +63,37 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 1
 fi
 ARCH="$(uname -m)"
-if [[ "$ARCH" != "x86_64" ]]; then
+if [[ "$ARCH" == "x86_64" ]]; then
+  echo "✓ Intel Mac ($ARCH), $(sw_vers -productVersion)"
+elif [[ "$ALLOW_CROSS" == "1" ]]; then
+  echo "NOTE: cross-compiling x86_64 on $ARCH via Rosetta 2 (--allow-cross)."
+  echo "This is the CI fallback now that GitHub has no Intel runner."
+  echo "The built .app is still x86_64 — it runs on Intel Macs, and"
+  echo "under Rosetta on Apple Silicon. It is NOT an arm64 build."
+  if ! arch -x86_64 /usr/bin/true 2>/dev/null; then
+    echo "ERROR: Rosetta 2 is not available. Run:"
+    echo "  softwareupdate --install-rosetta --agree-to-license"
+    exit 1
+  fi
+  if [[ -z "${X86_64_PYTHON:-}" ]]; then
+    echo "ERROR: --allow-cross needs X86_64_PYTHON set to an x86_64"
+    echo "python3.11/3.12 binary (e.g. the python.org universal2"
+    echo "install, invoked as: arch -x86_64 <python>)."
+    exit 1
+  fi
+  if [[ "$(arch -x86_64 "$X86_64_PYTHON" -c 'import platform; print(platform.machine())')" != "x86_64" ]]; then
+    echo "ERROR: X86_64_PYTHON ($X86_64_PYTHON) is not an x86_64 interpreter."
+    exit 1
+  fi
+  export UV_PYTHON="$X86_64_PYTHON"
+  echo "✓ Rosetta + x86_64 python: $X86_64_PYTHON"
+  echo "✓ Cross-compile host: $ARCH, $(sw_vers -productVersion) (target x86_64)"
+else
   echo "ERROR: this script builds the INTEL (x86_64) app; this Mac is $ARCH."
   echo "For Apple Silicon, use ./setup_apple_silicon.sh (MLX backend)."
+  echo "For CI cross-compile, pass --allow-cross (needs Rosetta + X86_64_PYTHON)."
   exit 1
 fi
-echo "✓ Intel Mac ($ARCH), $(sw_vers -productVersion)"
 if ! xcode-select -p >/dev/null 2>&1; then
   echo "ERROR: Xcode Command Line Tools not found. Run: xcode-select --install"
   exit 1

@@ -4,17 +4,23 @@
 #   build/Subvox Local.dmg   (uploaded as a workflow artifact, always)
 #   + a GitHub Release asset when the run is triggered by a version tag.
 #
-# HONEST NOTES — read before trusting a green run:
-# - This workflow targets macos-13, the last GitHub runner label that was
-#   Intel (x86_64). GitHub has been retiring macos-13; if this run fails
-#   with "runner not found" / label unavailable, macos-13 is gone and the
-#   fallback is an Apple Silicon runner (macos-14/15) cross-compiling
-#   x86_64 — which the current build scripts do NOT support (build_app.sh
-#   refuses non-Intel machines, PyInstaller cannot easily freeze an
-#   x86_64 CPU-torch backend on arm64). That fallback needs real work,
-#   not a label swap.
-# - The .dmg is UNSIGNED (no SIGN_IDENTITY in CI). Gatekeeper will block
-#   a plain double-click on other Macs; right-click > Open works.
+# RUNNER HISTORY (honest):
+# - First version used runs-on: macos-13, the last Intel (x86_64)
+#   GitHub-hosted label. That run (41219119999) sat QUEUED for 11+
+#   minutes with no runner ever assigned: the macos-13 label is gone
+#   from GitHub's runner list. macos-14 was retired 1 Oct 2026 too.
+# - This version therefore runs on macos-15 (Apple Silicon, arm64)
+#   and CROSS-COMPILES x86_64 under Rosetta 2: an x86_64 Python
+#   (python.org universal2 installer, run via `arch -x86_64`) builds
+#   the PyInstaller backend, and swiftc already targets
+#   x86_64-apple-macosx14.0. The output .app/.dmg are still x86_64
+#   and run natively on Francis's Intel Mac (and under Rosetta on
+#   Apple Silicon). This is a cross-compile, NOT a native Intel build.
+#   If the cross-compile proves flaky, the remaining honest option is
+#   a self-hosted Intel Mac runner — there is no GitHub-hosted Intel
+#   runner left.
+# - The .dmg is UNSIGNED (no SIGN_IDENTITY in CI). Gatekeeper will
+#   block a plain double-click on other Macs; right-click > Open works.
 #   Signing + notarization need an Apple Developer account and are NOT
 #   wired up here.
 # - A green build does NOT mean the app works end to end. Known gaps
@@ -39,32 +45,58 @@ permissions:
 
 jobs:
   build-intel-dmg:
-    # macos-13 = last Intel (x86_64) GitHub-hosted runner label.
-    # If GitHub has removed it, this job fails at queue time with a
-    # label error — see the header note; do not silently swap labels.
-    runs-on: macos-13
+    runs-on: macos-15  # Apple Silicon host; x86_64 is cross-compiled (see header)
+    env:
+      X86_64_PYTHON: /Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12
     steps:
       - name: Check out
         uses: actions/checkout@v4
 
-      - name: Confirm Intel runner
+      - name: Confirm Apple Silicon host
         run: |
           set -euo pipefail
           echo "OS: $(sw_vers -productVersion)  arch: $(uname -m)"
-          if [[ "$(uname -m)" != "x86_64" ]]; then
-            echo "ERROR: expected an Intel (x86_64) runner, got $(uname -m)."
-            echo "build_app.sh refuses non-Intel machines; cross-compiling"
-            echo "x86_64 on Apple Silicon is NOT supported by these scripts."
+          if [[ "$(uname -m)" != "arm64" ]]; then
+            echo "ERROR: this fallback workflow expects an arm64 macos-15 host, got $(uname -m)."
             exit 1
           fi
 
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+      - name: Install Rosetta 2
+        run: |
+          set -euo pipefail
+          if pgrep -q oahd; then
+            echo "Rosetta already installed."
+          else
+            sudo softwareupdate --install-rosetta --agree-to-license
+          fi
+          arch -x86_64 /usr/bin/true
+          echo "Rosetta OK."
 
-      - name: Build Subvox Local.app
-        run: ./packaging/build_app.sh
+      - name: Install x86_64 Python 3.12 (python.org universal2)
+        run: |
+          set -euo pipefail
+          # Universal2 installer; the x86_64 slice is used via arch -x86_64.
+          curl -fsSL -o /tmp/python-3.12.7.pkg \
+            https://www.python.org/ftp/python/3.12.7/python-3.12.7-macos11.pkg
+          sudo installer -pkg /tmp/python-3.12.7.pkg -target /
+          arch -x86_64 "$X86_64_PYTHON" --version
+          MACHINE="$(arch -x86_64 "$X86_64_PYTHON" -c 'import platform; print(platform.machine())')"
+          echo "Python reports machine: $MACHINE"
+          if [[ "$MACHINE" != "x86_64" ]]; then
+            echo "ERROR: expected the x86_64 slice, got $MACHINE."
+            exit 1
+          fi
+
+      - name: Build Subvox Local.app (x86_64 cross-compile)
+        run: ./packaging/build_app.sh --allow-cross
+
+      - name: Verify the .app is really x86_64
+        run: |
+          set -euo pipefail
+          file "build/Subvox Local.app/Contents/MacOS/SubvoxLocal"
+          file "build/Subvox Local.app/Contents/Resources/subvox-backend/subvox-local"
+          lipo -archs "build/Subvox Local.app/Contents/MacOS/SubvoxLocal" | grep -q x86_64
+          echo "x86_64 arch confirmed."
 
       - name: Build Subvox Local.dmg
         run: ./packaging/build_dmg.sh
