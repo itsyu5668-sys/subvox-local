@@ -19,7 +19,7 @@
 #      CPU torch, llama-cpp, mediapipe, vendored lipflow/espnet).
 #      Models are NOT bundled — they download on first launch.
 #   3. Compiles the SwiftUI menu-bar app with swiftc (there is no
-#      .xcodeproj yet — all 12 files in swift/*.swift are compiled
+#      .xcodeproj yet — all swift/*.swift files are compiled
 #      together as one module).
 #      Once an Xcode project exists, replace step 3 with xcodebuild
 #      (see the commented block below).
@@ -184,9 +184,9 @@ fi
 if [[ "$SKIP_SWIFT" == "0" ]]; then
   echo
   echo "== Swift app: swiftc (no .xcodeproj yet) =="
-  # Full 12-file SwiftUI app — compile ALL swift/*.swift together as one
+  # Full SwiftUI app — compile ALL swift/*.swift together as one
   # module. (An older version of this script compiled only
-  # SubvoxLocalApp.swift; that no longer works — the app is 12 files now.)
+  # SubvoxLocalApp.swift; that no longer works — the app is 15 files now.)
   # -target pins Intel; -O optimises.
   # If this fails with a MenuBarExtra / SwiftUI error, the fix is an
   # Xcode project (see the xcodebuild block below) — not a swiftc flag.
@@ -218,6 +218,36 @@ chmod +x "$APP/Contents/MacOS/SubvoxLocal" \
          "$APP/Contents/Resources/subvox-backend/subvox-local"
 # Remove quarantine-prone junk if any crept in.
 find "$APP" -name ".DS_Store" -delete 2>/dev/null || true
+
+# --- 4b. Gate: CFBundleExecutable MUST be a compiled binary -----------
+# The retired hand-built click-to-open .app had a bash script as
+# CFBundleExecutable. Launch Services treated it as a script to edit,
+# so double-clicking it opened Script Editor, and Gatekeeper rejected
+# it. That must never ship again: fail the build here — loudly, with
+# the exact cause — if the executable is not a Mach-O 64-bit x86_64
+# binary. (CI repeats this check in its own step; both must pass.)
+echo
+echo "== Gate: CFBundleExecutable is a compiled binary (never a script) =="
+EXEC_NAME="$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP/Contents/Info.plist" 2>/dev/null || echo SubvoxLocal)"
+if [[ "$EXEC_NAME" != "SubvoxLocal" ]]; then
+  echo "ERROR: Info.plist CFBundleExecutable is '$EXEC_NAME', expected 'SubvoxLocal'."
+  exit 1
+fi
+EXEC_PATH="$APP/Contents/MacOS/$EXEC_NAME"
+file "$EXEC_PATH"
+if ! file "$EXEC_PATH" | grep -q "Mach-O 64-bit executable x86_64"; then
+  echo "ERROR: $EXEC_PATH is NOT a Mach-O 64-bit x86_64 binary."
+  echo "If it is a shell script, the .app is broken the same way the"
+  echo "retired click-to-open .app was (opens Script Editor, Gatekeeper"
+  echo "rejects it). Fix the swiftc step — never ship a script as"
+  echo "CFBundleExecutable. Fallback: packaging/launcher-swift/README.md"
+  exit 1
+fi
+lipo -archs "$EXEC_PATH" | grep -q x86_64 || {
+  echo "ERROR: lipo does not list x86_64 for $EXEC_PATH."
+  exit 1
+}
+echo "✓ CFBundleExecutable is a compiled x86_64 binary: $EXEC_PATH"
 
 # --- 5. Smoke test ------------------------------------------------------
 echo
