@@ -41,9 +41,12 @@ carries only sdists and the abetlen CPU wheel index ships macOS wheels
 for arm64 only (checked 2026-10-31, all versions). It builds from
 source, but the build fails linking the `llama-server` binary (httplib
 TLS needs x86_64 OpenSSL symbols macOS does not provide). `build_app.sh`
-therefore installs it with `CMAKE_ARGS="-DLLAMA_BUILD_SERVER=OFF"` —
-Subvox never uses the server binary. If a future version ships an
-Intel macOS wheel, the flag can go.
+therefore exports `CMAKE_ARGS="-DLLAMA_BUILD_SERVER=OFF"` before any
+install step — exported, not inline, because `pip install -e .` and
+`uv sync` build llama-cpp-python as a project dependency (run 5 proved
+the inline-only version never reaches that build). Subvox never uses
+the server binary. If a future version ships an Intel macOS wheel,
+the flag can go.
 
 | Step | Time |
 |---|---|
