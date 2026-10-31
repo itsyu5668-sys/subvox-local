@@ -114,14 +114,35 @@ if [[ "$SKIP_BACKEND" == "0" ]]; then
   echo
   echo "== Backend: PyInstaller (CPU torch, no MLX) =="
   # CPU-only torch: PyPI macOS wheels are CPU-only already (CUDA wheels
-  # are Linux-only), so plain `uv sync` is enough. llama-cpp-python is
-  # NOT in pyproject.toml yet (the GGUF cleanup branch hasn't landed);
-  # install it into the build venv so the spec's hidden import resolves.
-  uv sync
-  uv pip install llama-cpp-python pyinstaller
-  echo "NOTE: MLX is deliberately excluded — it has no x86_64 wheels."
-  uv run pyinstaller packaging/PyInstaller.spec --noconfirm \
-      --distpath "$BUILD/dist" --workpath "$BUILD/pyinstaller"
+  # are Linux-only), so plain `uv sync` is enough.
+  if [[ "$ALLOW_CROSS" == "1" ]]; then
+    # CROSS-COMPILE PATH (Apple Silicon host -> x86_64 target).
+    # uv cannot force an interpreter to run under Rosetta: a venv made
+    # from the python.org universal2 python runs as arm64, and the first
+    # CI attempt failed exactly there — PyInstaller collected an arm64
+    # markupsafe .so and refused the x86_64 target
+    # (IncompatibleBinaryArchError). So every Python invocation here goes
+    # through `arch -x86_64`, and deps are installed with pip, not uv:
+    # under Rosetta the universal2 interpreter reports x86_64 and pip
+    # picks x86_64 wheels.
+    XVENV="$ROOT/.venv-cross"
+    rm -rf "$XVENV"
+    arch -x86_64 "$X86_64_PYTHON" -m venv "$XVENV"
+    XPY=(arch -x86_64 "$XVENV/bin/python")
+    "${XPY[@]}" -c 'import platform; print("venv python arch:", platform.machine())'
+    "${XPY[@]}" -m pip install --quiet --upgrade pip
+    "${XPY[@]}" -m pip install -e "$ROOT"
+    "${XPY[@]}" -m pip install llama-cpp-python pyinstaller
+    echo "NOTE: MLX is deliberately excluded — it has no x86_64 wheels."
+    "${XPY[@]}" -m PyInstaller packaging/PyInstaller.spec --noconfirm \
+        --distpath "$BUILD/dist" --workpath "$BUILD/pyinstaller"
+  else
+    uv sync
+    uv pip install llama-cpp-python pyinstaller
+    echo "NOTE: MLX is deliberately excluded — it has no x86_64 wheels."
+    uv run pyinstaller packaging/PyInstaller.spec --noconfirm \
+        --distpath "$BUILD/dist" --workpath "$BUILD/pyinstaller"
+  fi
   if [[ ! -x "$BUILD/dist/subvox-local/subvox-local" ]]; then
     echo "ERROR: PyInstaller output missing: $BUILD/dist/subvox-local/subvox-local"
     exit 1

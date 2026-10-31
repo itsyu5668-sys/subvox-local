@@ -1,0 +1,8 @@
+models/
+__pycache__/
+.pytest_cache/
+.venv/
+.venv-cross/
+build/
+*.dmg
+*.DS_Store
