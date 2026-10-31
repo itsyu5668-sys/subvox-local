@@ -1,11 +1,55 @@
 # Subvox Local — packaging (Intel Mac one-click install)
 
-**UNTESTED ON INTEL MAC.** Everything in this folder was written on a
-Linux VM (no Xcode, no macOS toolchain). Nothing here has run on a Mac
-yet. The first build on Francis's Intel Mac will need fixes — that is
+## RETIRED: the hand-built script .app — do not ship it, do not rebuild it
+
+The click-to-open `.app` that was handed to Francis on 2026-10-31
+(`Subvox Local.app`, shipped as `Subvox-Local-Click-To-Open.zip`) is
+**retired**. Its `CFBundleExecutable` was a 499-byte **bash script**
+(`Contents/MacOS/SubvoxLocal` execing `Contents/Resources/install.sh`).
+On his Intel Mac that did exactly what a script-as-executable does:
+
+- double-clicking it opened **Script Editor** instead of running the
+  app (Launch Services treats a script executable as a document to edit);
+- Gatekeeper said **"Apple could not verify Subvox Local is free of
+  malware"** and refused it.
+
+A `.app` whose executable is a script is broken by design, and no
+amount of re-zipping or re-signing fixes it. **The only supported Mac
+builds are the two below.** Both produce a `.app` whose
+`CFBundleExecutable` is a real compiled Mach-O x86_64 binary (the
+full SwiftUI app, compiled with `swiftc`), and both builds now fail
+loudly if the executable is ever a script again
+(`build_app.sh` step 4b + the workflow's "Verify CFBundleExecutable"
+step). The fallback if the SwiftUI binary is ever unusable is the
+minimal compiled launcher in `packaging/launcher-swift/` — still a
+compiled binary, never a script.
+
+**UNTESTED ON A REAL INTEL MAC.** Everything in this folder was
+written on a Linux VM (no Xcode, no macOS toolchain). CI has built
+the backend + PyInstaller green on a cross-compile host (run 10), but
+no complete `.dmg` has ever been produced and nothing here has run on
+Francis's Intel Mac yet. The first build will need fixes — that is
 expected, and the scripts say so where it matters.
 
-## The one command (on Francis's Intel Mac)
+## The two supported builds
+
+**A. GitHub Actions .dmg (no Mac build needed):** every push to `main`
+builds `Subvox Local.dmg` on a macOS runner (Apple Silicon host,
+x86_64 cross-compile under Rosetta 2 — there is no GitHub-hosted
+Intel runner left) and uploads it as the `subvox-local-intel-dmg`
+artifact (90 days). Download it from the run's Artifacts, or from a
+tagged Release if one exists. **Unsigned** — see the signing section
+below. First green build: **run 11** (2026-10-31 19:10 UTC, commit
+`776137ce`, "CI fix: drop specifier: from Superwhisper price
+interpolation") — artifact `subvox-local-intel-dmg`, ~434 MB
+(455,480,867 bytes), at
+https://github.com/itsyu5668-sys/subvox-local/actions/runs/41231078252
+(the artifact download needs a GitHub login; it is NOT a public
+direct link). Every push to `main` after that triggers a new run and
+a new artifact — always take the **latest green run's** artifact,
+not run 11's, once a newer green run exists.
+
+**B. One-command build on Francis's Intel Mac:**
 
 ```sh
 cd ~/code/subvox-local        # or wherever the repo lives
@@ -14,7 +58,9 @@ cd ~/code/subvox-local        # or wherever the repo lives
 ```
 
 Then install it like any Mac app: open the `.dmg`, drag
-**Subvox Local.app** onto **Applications**, double-click it.
+**Subvox Local.app** onto **Applications**, then **right-click the
+app → Open** the first time (unsigned build — a plain double-click is
+blocked by Gatekeeper; see the signing checklist below).
 
 ### What you need before running it
 
@@ -113,6 +159,7 @@ next to it, or Ctrl-C — partial files are kept.
 | `PyInstaller.spec` | Backend spec: one-dir, x86_64, CPU torch, no MLX, hidden imports for vendored lipflow/espnet |
 | `first_launch_downloader.py` | Stdlib-only model downloader: resumable, SHA-256 verified, progress JSON for the Swift UI |
 | `launcher.sh` | Bundle launcher: models → symlink → doctor → backend subcommand |
+| `launcher-swift/main.swift` + `build-launcher.sh` | Minimal compiled launcher (Foundation-only Swift binary). Fallback entry point if the full SwiftUI binary is ever unusable — see `packaging/launcher-swift/README.md`. **UNTESTED ON MAC, not wired into `build_app.sh` or CI yet** (on purpose: it must compile cleanly once on a real Mac first). |
 | `Info.plist` | Bundle metadata (menu-bar only, camera usage string, macOS 14+) |
 | `SubvoxLocal.entitlements` | Camera + unsigned-executable-memory + disable-library-validation (needed for torch/llama.cpp in a signed bundle) |
 
