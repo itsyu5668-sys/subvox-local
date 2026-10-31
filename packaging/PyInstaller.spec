@@ -47,9 +47,15 @@ REPO = os.path.abspath(os.path.join(SPECPATH, ".."))
 UPSTREAM = os.path.join(REPO, "lipflow-upstream")
 
 # --- collect big packages wholesale (hooks miss their data files) ------
-_mp_tmp, _mp_bin, _mp_data = collect_all("mediapipe")
-_sp_tmp, _sp_bin, _sp_data = collect_all("sentencepiece")
-_av_tmp, _av_bin, _av_data = collect_all("av")
+# PyInstaller 6 returns collect_all() as (datas, binaries, hiddenimports)
+# — the old PyInstaller 5 order was (tmpdir, binaries, datas). The spec
+# was written for the old order, so hiddenimports silently received the
+# (src, dest) datas TUPLES and Analysis crashed (runs 8-9):
+#   TypeError: expected string or bytes-like object, got 'tuple'
+#   (re.search on a datas tuple inside hiddenimports).
+_mp_data, _mp_bin, _mp_hidden = collect_all("mediapipe")
+_sp_data, _sp_bin, _sp_hidden = collect_all("sentencepiece")
+_av_data, _av_bin, _av_hidden = collect_all("av")
 
 datas = [
     # Lipflow data files the backend reads at runtime.
@@ -59,7 +65,7 @@ datas = [
 datas += _mp_data + _sp_data + _av_data
 binaries = _mp_bin + _sp_bin + _av_bin
 hiddenimports = (
-    _mp_tmp + _sp_tmp + _av_tmp + [
+    _mp_hidden + _sp_hidden + _av_hidden + [
         # Core backend deps (lazy imports PyInstaller analysis misses).
         "torch", "torch.nn", "torch.nn.functional",
         "numpy", "cv2", "sentencepiece", "sounddevice",

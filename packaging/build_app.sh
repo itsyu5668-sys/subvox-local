@@ -155,13 +155,16 @@ if [[ "$SKIP_BACKEND" == "0" ]]; then
     "${XPY[@]}" -c 'import platform; print("venv python arch:", platform.machine())'
     "${XPY[@]}" -m pip install --quiet --upgrade pip
     "${XPY[@]}" -m pip install -e "$ROOT"
-    "${XPY[@]}" -m pip install llama-cpp-python pyinstaller
+    # Pin PyInstaller: the spec relies on the PyInstaller 6
+    # collect_all() return order (datas, binaries, hiddenimports).
+    "${XPY[@]}" -m pip install llama-cpp-python pyinstaller==6.22.3
     echo "NOTE: MLX is deliberately excluded — it has no x86_64 wheels."
     "${XPY[@]}" -m PyInstaller packaging/PyInstaller.spec --noconfirm \
         --distpath "$BUILD/dist" --workpath "$BUILD/pyinstaller"
   else
     uv sync
-    uv pip install llama-cpp-python pyinstaller
+    # Pin PyInstaller (same reason as the cross path above).
+    uv pip install llama-cpp-python pyinstaller==6.22.3
     echo "NOTE: MLX is deliberately excluded — it has no x86_64 wheels."
     uv run pyinstaller packaging/PyInstaller.spec --noconfirm \
         --distpath "$BUILD/dist" --workpath "$BUILD/pyinstaller"
