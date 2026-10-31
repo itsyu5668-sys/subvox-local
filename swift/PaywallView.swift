@@ -235,7 +235,7 @@ struct PaywallView: View {
                 )
                 compareRow(
                     name: "Superwhisper",
-                    detail: "About $\(Pricing.superwhisperMonthlyUSD, specifier: "%.2f")/mo. Cloud-based voice dictation."
+                    detail: "About $\(Pricing.superwhisperMonthlyUSD)/mo. Cloud-based voice dictation."
                 )
                 compareRow(
                     name: "Subvox Local",
